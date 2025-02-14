@@ -3,7 +3,7 @@
  * 
  * This file is a part of NSIS.
  * 
- * Copyright (C) 1999-2023 Nullsoft and Contributors
+ * Copyright (C) 1999-2025 Nullsoft and Contributors
  * 
  * Licensed under the zlib/libpng license (the "License");
  * you may not use this file except in compliance with the License.
@@ -640,6 +640,57 @@ FILE* my_fopen(const TCHAR *path, const char *mode)
   return f;
 }
 
+static inline const TCHAR* getptrstrfmt_tstr()
+{
+#ifdef _WIN32
+  return sizeof(void*) > 4 ? _T("%I64u") : _T("%u");
+#else
+  assert(sizeof(void*) <= sizeof(unsigned long long));
+  return sizeof(void*) > sizeof(unsigned long) ? _T("%llu") : _T("%lu");
+#endif
+}
+
+static inline const char* getptrstrfmt_cstr()
+{
+#ifdef _WIN32
+  return sizeof(void*) > 4 ? "%I64u" : "%u";
+#else
+  assert(sizeof(void*) <= sizeof(unsigned long long));
+  return sizeof(void*) > sizeof(unsigned long) ? "%llu" : "%lu";
+#endif
+}
+
+int ptrtostr(const void* Src, TCHAR*Dst)
+{
+  return wsprintf(Dst, getptrstrfmt_tstr(), Src);
+}
+
+void* strtoptr(const TCHAR*Src)
+{
+#ifdef _WIN32
+  void*v;
+  return _stscanf(Src, getptrstrfmt_tstr(), &v) == 1 ? v : 0;
+#else
+#ifdef _UNICODE
+  char buf[42];
+  size_t cb = wcsrtombs(buf, &Src, sizeof(buf), 0);
+  if (cb >= sizeof(buf)) return 0;
+#else
+  const char* buf = Src;
+#endif
+  if (sizeof(void*) > sizeof(unsigned long))
+  {
+    unsigned long long v;
+    return sscanf(buf, getptrstrfmt_cstr(), &v) == 1 ? (void*) v : 0;
+  }
+  else
+  {
+    unsigned long v;
+    return sscanf(buf, getptrstrfmt_cstr(), &v) == 1 ? (void*) v : 0;
+  }
+#endif
+}
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #if (defined(_MSC_VER) && (_MSC_VER >= 1200)) || defined(__MINGW32__)
@@ -653,8 +704,8 @@ UINT64 get_file_size64(FILE *f)
 UINT64 get_file_size64(FILE *f)
 {
   UINT64 result = invalid_file_size64;
-  // 32bit plaforms require _FILE_OFFSET_BITS = 64 to correctly return the size
-#if _XOPEN_SOURCE >= 500 || _POSIX_C_SOURCE >= 200112L
+  // 32bit platforms require _FILE_OFFSET_BITS = 64 to correctly return the size
+#if _XOPEN_SOURCE >= 500 || _POSIX_C_SOURCE >= 200112L || defined(__APPLE__) || defined(__FreeBSD__)
   struct stat st;
   if (0 == fstat(fileno(f), &st) && st.st_size <= (sizeof(st.st_size) >= 8 ? (off_t)0x7fffffffffffffffLL : LONG_MAX))
     result = (UINT64) st.st_size;
@@ -690,7 +741,7 @@ UINT64 Platform_GetMaxFileSize()
 {
 #ifdef _WIN32
   return ~(UINT64)0;
-#elif _XOPEN_SOURCE >= 500 || _POSIX_C_SOURCE >= 200112L
+#elif _XOPEN_SOURCE >= 500 || _POSIX_C_SOURCE >= 200112L || defined(__APPLE__) || defined(__FreeBSD__)
   struct stat st;
   if (sizeof(st.st_size) >= 8)
   {

@@ -3,7 +3,7 @@
  * 
  * This file is a part of NSIS.
  * 
- * Copyright (C) 1999-2023 Nullsoft and Contributors
+ * Copyright (C) 1999-2025 Nullsoft and Contributors
  * 
  * Licensed under the zlib/libpng license (the "License");
  * you may not use this file except in compliance with the License.
@@ -142,6 +142,7 @@ enum
   TOK_P_TEMPFILE,
   TOK_P_DELFILE,
   TOK_P_APPENDFILE,
+  TOK_P_APPENDMEMFILE,
   TOK_P_GETDLLVERSION,
   TOK_P_GETTLBVERSION,
 

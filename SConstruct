@@ -216,6 +216,9 @@ if 'NSIS_CONFIG_CONST_DATA_PATH' in defenv['NSIS_CPPDEFINES']:
 	defenv.Append(NSIS_CPPDEFINES = [('PREFIX_DOC', '"%s"' % defenv.subst('$PREFIX_DOC'))])
 
 if defenv.get('SOURCE_DATE_EPOCH','') != '':
+	if defenv.get('SOURCE_DATE_EPOCH','').lower() == 'now':
+		import time
+		defenv['SOURCE_DATE_EPOCH'] = str(int(time.time()))
 	defenv['ENV']['SOURCE_DATE_EPOCH'] = defenv['SOURCE_DATE_EPOCH'] = int(defenv['SOURCE_DATE_EPOCH'], 0) # Normalize and apply to ENV for child processes
 	defenv.Append(NSIS_CPPDEFINES = [('NSIS_SOURCE_DATE_EPOCH', '%s' % defenv['SOURCE_DATE_EPOCH'])]) # Display in /HDRINFO
 
@@ -315,6 +318,14 @@ def GetArcSuffix(env, unicode = None):
 	if not unicode:
 		suff = '-ansi'
 	return GetArcCPU(env) + suff
+
+def GetTargetMinOSVersion(env):
+	if GetArcCPU(defenv) == 'arm64':
+		return (6, 4)
+	if not GetArcCPU(defenv) == 'x86':
+		return (5, 1)
+	return (4, 0)
+
 
 def SafeFile(f):
 	from types import StringType
@@ -449,7 +460,7 @@ def Sign(targets):
 			a = defenv.Action('$CODESIGNER "%s"' % t.path)
 			defenv.AddPostAction(t, a)
 
-Import('SilentActionEcho IsPEExecutable SetPESecurityFlagsWorker MakeReproducibleAction')
+Import('SilentActionEcho IsPEExecutable SetPESecurityFlagsWorker SetPEMinOS MakeReproducibleAction')
 def SetPESecurityFlagsAction(target, source, env):
 	for t in target:
 		SetPESecurityFlagsWorker(t.path)
@@ -463,6 +474,14 @@ def SetPESecurityFlags(targets):
 	for t in targets:
 		a = defenv.Action(SetPESecurityFlagsAction, strfunction=SetPESecurityFlagsActionEcho)
 		defenv.AddPostAction(t, a)
+
+def SetTargetPEMinOS(target, source=None, env=None):
+	for t in target:
+		if source is None:
+			defenv.AddPostAction(t, defenv.Action(SetTargetPEMinOS, strfunction=SilentActionEcho))
+		else:
+			ver = GetTargetMinOSVersion(env)
+			SetPEMinOS(t.path, ver[0], ver[1], ver[0], ver[1])
 
 def MakeReproducible(targets):
 	for t in targets:
@@ -485,6 +504,7 @@ defenv.DistributeDocs = DistributeDocs
 defenv.DistributeExamples = DistributeExamples
 defenv.Sign = Sign
 defenv.SetPESecurityFlags = SetPESecurityFlags
+defenv.SetTargetPEMinOS = SetTargetPEMinOS
 defenv.MakeReproducible = MakeReproducible
 defenv.TestScript = TestScript
 
@@ -656,6 +676,7 @@ def BuildStub(compression, solid, unicode):
 	target = defenv.SConscript(dirs = 'Source/exehead', variant_dir = build_dir, duplicate = False, exports = exports)
 	env.SideEffect('%s/stub_%s.map' % (build_dir, stub), target)
 
+	env.SetTargetPEMinOS(target)
 	env.MakeReproducible(target)
 	env.DistributeStubs(target, names=compression+suffix)
 
@@ -725,6 +746,7 @@ def BuildPluginWorker(target, source, libs, examples = None, docs = None,
 	defenv.Alias(target, plugin)
 	defenv.Alias('plugins', plugin)
 
+	defenv.SetTargetPEMinOS(plugin)
 	defenv.SetPESecurityFlags(plugin)
 	defenv.MakeReproducible(plugin)
 	defenv.Sign(plugin)
@@ -821,6 +843,8 @@ def BuildUtil(target, source, libs, entry = None, res = None,
 	defenv.Alias(target, util)
 	defenv.Alias('utils', util)
 
+	if (str(target)[:7]).lower() == 'RegTool'.lower():
+		defenv.SetTargetPEMinOS(util)
 	defenv.MakeReproducible(util)
 	defenv.Sign(util)
 

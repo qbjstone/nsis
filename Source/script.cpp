@@ -3,7 +3,7 @@
  * 
  * This file is a part of NSIS.
  * 
- * Copyright (C) 1999-2023 Nullsoft and Contributors
+ * Copyright (C) 1999-2025 Nullsoft and Contributors
  * 
  * Licensed under the zlib/libpng license (the "License");
  * you may not use this file except in compliance with the License.
@@ -219,7 +219,7 @@ int CEXEBuild::doParse(const TCHAR *str)
     LineParser prevline(inside_comment);
     prevline.parse((TCHAR*)m_linebuild.get());
     LineParser thisline(inside_comment);
-    thisline.parse((TCHAR*)str);
+    thisline.parse(str);
 
     if (prevline.inComment() && !thisline.inComment())
     {
@@ -242,7 +242,13 @@ int CEXEBuild::doParse(const TCHAR *str)
   // escaped quotes should be ignored for compile time commands that set defines
   // because defines can be inserted in commands at a later stage
   bool ignore_escaping = (!_tcsnicmp((TCHAR*)m_linebuild.get(),_T("!define"),7) || !_tcsncicmp((TCHAR*)m_linebuild.get(),_T("!insertmacro"),12));
-  res=line.parse((TCHAR*)m_linebuild.get(), ignore_escaping);
+
+  NStreamEncoding enc(NStreamEncoding::UNKNOWN);
+
+  res=line.parse((TCHAR*)m_linebuild.get(), ignore_escaping, linecnt < 3 ? &enc : NULL);
+
+  if (enc.GetCodepage() != NStreamEncoding::UNKNOWN && curlinereader)
+      curlinereader->StreamEncoding().SafeSetCodepage(enc.GetCodepage());
 
   inside_comment = line.inCommentBlock();
 
@@ -751,7 +757,7 @@ l_errwcconv:
   return PS_OK;
 }
 
-int CEXEBuild::process_oneline(const TCHAR *line, const TCHAR *filename, int linenum)
+int CEXEBuild::process_oneline(const TCHAR *line, const TCHAR *filename, int linenum, unsigned int plflags)
 {
   const TCHAR *last_filename = curfilename;
   int last_linecnt = linecnt;
@@ -762,13 +768,14 @@ int CEXEBuild::process_oneline(const TCHAR *line, const TCHAR *filename, int lin
 
 #ifdef NSIS_SUPPORT_STANDARD_PREDEFINES
   TCHAR *oldfilename = NULL, *oldtimestamp = NULL, *oldline = NULL;
-  bool is_commandline = !_tcscmp(filename, get_commandlinecode_filename());
-  bool is_macro = !_tcsncmp(filename,_T("macro:"),6);
+  bool realfile = !(plflags & PLF_VIRTUALFILE);
+  bool is_macro = (plflags & PLF_MACRO);
+  bool setline = linenum != 0;
 
-  if (!is_commandline) { // Don't set the predefines for command line /X option
+  if (setline) {
     if (!is_macro) {
       oldfilename = set_file_predefine(curfilename);
-      oldtimestamp = set_timestamp_predefine(curfilename);
+      if (realfile) oldtimestamp = set_timestamp_predefine(curfilename);
     }
     oldline = set_line_predefine(linecnt, is_macro);
   }
@@ -779,10 +786,10 @@ int CEXEBuild::process_oneline(const TCHAR *line, const TCHAR *filename, int lin
   int ret = doParse((TCHAR*)linedata.get());
 
 #ifdef NSIS_SUPPORT_STANDARD_PREDEFINES
-  if (!is_commandline) { // Don't set the predefines for command line /X option
+  if (setline) {
     if (!is_macro) {
       restore_file_predefine(oldfilename);
-      restore_timestamp_predefine(oldtimestamp);
+      if (realfile) restore_timestamp_predefine(oldtimestamp);
     }
     restore_line_predefine(oldline);
   }
@@ -891,6 +898,8 @@ int CEXEBuild::doCommand(int which_token, LineParser &line)
     return pp_delfile(line);
     case TOK_P_APPENDFILE:
     return pp_appendfile(line);
+    case TOK_P_APPENDMEMFILE:
+    return pp_appendmemfile(line);
     case TOK_P_GETDLLVERSION:
     case TOK_P_GETTLBVERSION:
     return pp_getversion(which_token, line);
@@ -1390,12 +1399,22 @@ int CEXEBuild::doCommand(int which_token, LineParser &line)
         if (!_tcsicmp(line.gettoken_str(1),_T("/NOCUSTOM")))
         {
           build_header.flags|=CH_FLAGS_NO_CUSTOM;
-          SCRIPT_MSG(_T("InstType: disabling custom install type\n"));
+          SCRIPT_MSG(_T("InstType: disabling custom %") NPRIs _T("install type\n"), _T(""));
+        }
+        else if (!_tcsicmp(line.gettoken_str(1),_T("/UNINSTNOCUSTOM")))
+        {
+          build_uninst.flags|=CH_FLAGS_NO_CUSTOM;
+          SCRIPT_MSG(_T("InstType: disabling custom %") NPRIs _T("install type\n"), _T("un"));
         }
         else if (!_tcsicmp(line.gettoken_str(1),_T("/COMPONENTSONLYONCUSTOM")))
         {
           build_header.flags|=CH_FLAGS_COMP_ONLY_ON_CUSTOM;
-          SCRIPT_MSG(_T("InstType: making components viewable only on custom install type\n"));
+          SCRIPT_MSG(_T("InstType: making components viewable only on custom %") NPRIs _T("install type\n"), _T(""));
+        }
+        else if (!_tcsicmp(line.gettoken_str(1),_T("/UNINSTCOMPONENTSONLYONCUSTOM")))
+        {
+          build_uninst.flags|=CH_FLAGS_COMP_ONLY_ON_CUSTOM;
+          SCRIPT_MSG(_T("InstType: making components viewable only on custom %") NPRIs _T("install type\n"), _T("un"));
         }
         else if (!_tcsnicmp(line.gettoken_str(1),_T("/CUSTOMSTRING="),14))
         {
@@ -1554,25 +1573,26 @@ int CEXEBuild::doCommand(int which_token, LineParser &line)
     return PS_OK;
     case TOK_LICENSEBKCOLOR:
       {
-        const TCHAR *cmdname = _T("LicenseBkColor");
-        TCHAR *p = line.gettoken_str(1);
-        if (!_tcsicmp(p,_T("/windows")))
+        const TCHAR *cmdname = _T("LicenseBkColor"), *paramname;
+        TCHAR *p = line.gettoken_str(1), *p2;
+        if (!_tcsicmp(p,paramname = _T("/windows")) || !_tcsicmp(p,_T("/window")))
         {
           build_header.license_bg=-COLOR_WINDOW;
-          SCRIPT_MSG(_T("%") NPRIs _T(": /windows\n"),cmdname);
+          SCRIPT_MSG(_T("%") NPRIs _T(": %") NPRIs _T("\n"),cmdname,paramname);
         }
-        else if (!_tcsicmp(p,_T("/grey")) || !_tcsicmp(p,_T("/gray")))
+        else if (!_tcsicmp(p,paramname = _T("/grey")) || !_tcsicmp(p,_T("/gray")))
         {
-          build_header.license_bg=-COLOR_BTNFACE;
-          SCRIPT_MSG(_T("%") NPRIs _T(": /grey\n"),cmdname);
+          build_header.license_bg=-COLOR_BTNFACE; /* Note: This might not actually be gray */
+          SCRIPT_MSG(_T("%") NPRIs _T(": %") NPRIs _T("\n"),cmdname,paramname);
         }
         else
         {
-          const int v=_tcstoul(p,&p,16);
+          const int v=_tcstoul(p,&p2,16);
+          if (p2 == p) return PS_ERROR;
           build_header.license_bg=((v&0xff)<<16)|(v&0xff00)|((v&0xff0000)>>16);
-          build_uninst.license_bg=build_header.license_bg;
           SCRIPT_MSG(_T("%") NPRIs _T(": %06X\n"),cmdname,v);
         }
+        build_uninst.license_bg=build_header.license_bg;
       }
     return PS_OK;
 #else
@@ -5119,8 +5139,8 @@ int CEXEBuild::doCommand(int which_token, LineParser &line)
         if ((ret=add_entry(&ent)) != PS_OK) return ret;
       }
 
-      // SetDetailsPrint lastused
-      ret=add_entry_direct(EW_SETFLAG, FLAG_OFFSET(status_update), 0, 1);
+      // SetDetailsPrint lastused (special)
+      ret=add_entry_direct(EW_SETFLAG, FLAG_OFFSET(status_update), 0, 1, -1);
       if (ret != PS_OK) return ret;
 
       // Call the DLL

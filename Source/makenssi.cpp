@@ -3,7 +3,7 @@
  * 
  * This file is a part of NSIS.
  * 
- * Copyright (C) 1999-2023 Nullsoft and Contributors
+ * Copyright (C) 1999-2025 Nullsoft and Contributors
  * 
  * Licensed under the zlib/libpng license (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@
 #include "winchar.h" // assert(sizeof(WINWCHAR)...)
 
 #include <nsis-version.h>
-#define NSIS_COPYYEARS _T("1999-2023")
+#define NSIS_COPYYEARS _T("1999-2025")
 
 using namespace std;
 
@@ -550,7 +550,7 @@ static inline int makensismain(int argc, TCHAR **argv)
       }
       else if (S7IsChEqualI('x',swname[0]) && swname[1])
       {
-        if (build.process_oneline(swname+1,build.get_commandlinecode_filename(),argpos+1) != PS_OK)
+        if (build.process_oneline(swname+1,build.get_commandlinecode_filename(),argpos+1,build.PLF_VIRTUALFILE) != PS_OK)
         {
           return 1;
         }
